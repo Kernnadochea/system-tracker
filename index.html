@@ -131,6 +131,13 @@ const PRESET_MEAL_ITEMS = [
   { id: "almonds", name: "Almonds, 1.5 oz (~35)", kcal: 245, protein: 9 },
 ];
 
+const PRESET_TRAINING_ITEMS = [
+  { id: "lift", name: "Lift Session", minutes: 45 },
+  { id: "muay-thai", name: "Muay Thai Rounds", minutes: 30 },
+  { id: "conditioning", name: "Conditioning / Bodyweight", minutes: 20 },
+  { id: "mobility", name: "Mobility / Recovery Work", minutes: 15 },
+];
+
 function todayStr() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -169,6 +176,7 @@ const DEFAULT_STATE = {
   weightLog: [],
   sleepLog: [],
   foodLog: [],
+  trainingLog: [],
   waterOz: 0,
 };
 
@@ -287,6 +295,8 @@ function SystemTracker() {
   const [foodName, setFoodName] = useState("");
   const [foodKcal, setFoodKcal] = useState("");
   const [foodProtein, setFoodProtein] = useState("");
+  const [trainingName, setTrainingName] = useState("");
+  const [trainingMinutes, setTrainingMinutes] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -517,6 +527,54 @@ function SystemTracker() {
     await persist(newState);
   }
 
+  async function togglePresetTraining(preset) {
+    if (!state) return;
+    const today = todayStr();
+    const existing = state.trainingLog.find((t) => t.date === today && t.presetId === preset.id);
+    let newTrainingLog;
+    if (existing) {
+      newTrainingLog = state.trainingLog.filter((t) => t.id !== existing.id);
+    } else {
+      newTrainingLog = [
+        ...state.trainingLog,
+        {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          date: today,
+          presetId: preset.id,
+          name: preset.name,
+          minutes: preset.minutes,
+        },
+      ].slice(-500);
+    }
+    const newState = { ...state, trainingLog: newTrainingLog };
+    setState(newState);
+    await persist(newState);
+  }
+
+  async function addTrainingEntry() {
+    if (!state) return;
+    const minutes = parseFloat(trainingMinutes);
+    if (!minutes || minutes <= 0 || minutes > 600) return;
+    const entry = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      date: todayStr(),
+      name: trainingName.trim() || "Untitled session",
+      minutes,
+    };
+    const newState = { ...state, trainingLog: [...state.trainingLog, entry].slice(-500) };
+    setState(newState);
+    setTrainingName("");
+    setTrainingMinutes("");
+    await persist(newState);
+  }
+
+  async function removeTrainingEntry(id) {
+    if (!state) return;
+    const newState = { ...state, trainingLog: state.trainingLog.filter((t) => t.id !== id) };
+    setState(newState);
+    await persist(newState);
+  }
+
   async function toggleWeighIn() {
     if (!state) return;
     const done = !state.weeklyWeighIn.done;
@@ -552,6 +610,11 @@ function SystemTracker() {
   const proteinToday = todaysFood.reduce((sum, f) => sum + f.protein, 0);
   const kcalStatus = kcalToday === 0 ? "none" : kcalToday < KCAL_MIN ? "under" : kcalToday > KCAL_MAX ? "over" : "inRange";
   const kcalColor = { none: "#475569", under: "#f59e0b", inRange: "#22c55e", over: "#ef4444" }[kcalStatus];
+
+  const todaysTraining = state.trainingLog.filter((t) => t.date === todayStr());
+  const checkedTrainingIds = new Set(todaysTraining.filter((t) => t.presetId).map((t) => t.presetId));
+  const extraTraining = todaysTraining.filter((t) => !t.presetId);
+  const minutesToday = todaysTraining.reduce((sum, t) => sum + t.minutes, 0);
 
   return (
     <div style={styles.page}>
@@ -774,6 +837,46 @@ function SystemTracker() {
             <input type="number" inputMode="numeric" placeholder="kcal" value={foodKcal} onChange={(e) => setFoodKcal(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addFoodEntry()} style={{ ...styles.weightInput, flex: 1 }} />
             <input type="number" inputMode="numeric" placeholder="protein g" value={foodProtein} onChange={(e) => setFoodProtein(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addFoodEntry()} style={{ ...styles.weightInput, flex: 1 }} />
             <button onClick={addFoodEntry} style={styles.weightBtn}>ADD</button>
+          </div>
+        </div>
+
+        <div style={styles.panel}>
+          <div style={styles.panelHeader}>
+            <span style={styles.bracket}>[</span> COMBAT LOG <span style={styles.bracket}>]</span>
+            <span style={styles.panelHeaderSub}>{minutesToday} min</span>
+          </div>
+
+          <div style={styles.presetList}>
+            {PRESET_TRAINING_ITEMS.map((item) => {
+              const done = checkedTrainingIds.has(item.id);
+              return (
+                <div key={item.id} className="quest-row" style={{ ...styles.questRow, borderColor: done ? "rgba(34,197,94,0.5)" : "rgba(148,163,184,0.25)", background: done ? "rgba(34,197,94,0.06)" : "transparent" }} onClick={() => togglePresetTraining(item)}>
+                  <div className="quest-check" style={{ ...styles.questCheck, background: done ? "#22c55e" : "transparent", borderColor: done ? "#22c55e" : "rgba(148,163,184,0.5)" }}>{done ? "✓" : ""}</div>
+                  <div style={styles.questText}>
+                    <div style={{ ...styles.questLabel, fontSize: 13, textDecoration: done ? "line-through" : "none", opacity: done ? 0.6 : 1 }}>{item.name}</div>
+                  </div>
+                  <div style={styles.questXp}>{item.minutes} min</div>
+                </div>
+              );
+            })}
+          </div>
+
+          {extraTraining.length > 0 && (
+            <div style={{ ...styles.logList, marginTop: 4, marginBottom: 8 }}>
+              {extraTraining.map((t) => (
+                <div key={t.id} style={styles.foodRow}>
+                  <span style={styles.foodName}>{t.name}</span>
+                  <span style={styles.foodMeta}>{t.minutes} min</span>
+                  <span style={styles.foodRemove} onClick={() => removeTrainingEntry(t.id)}>✕</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div style={styles.foodInputRow}>
+            <input type="text" placeholder="extra session" value={trainingName} onChange={(e) => setTrainingName(e.target.value)} style={{ ...styles.weightInput, flex: 2 }} />
+            <input type="number" inputMode="numeric" placeholder="min" value={trainingMinutes} onChange={(e) => setTrainingMinutes(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addTrainingEntry()} style={{ ...styles.weightInput, flex: 1 }} />
+            <button onClick={addTrainingEntry} style={styles.weightBtn}>ADD</button>
           </div>
         </div>
 
