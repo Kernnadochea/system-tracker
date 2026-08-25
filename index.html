@@ -647,7 +647,7 @@ function SystemTracker() {
 }
 
 const styles = {
-  page: { minHeight: "100vh", background: "radial-gradient(1200px 600px at 50% -10%, rgba(59,130,246,0.12), transparent), #05070d", padding: "24px 16px 60px", fontFamily: "'JetBrains Mono', 'Courier New', ui-monospace, SFMono-Regular, monospace", color: "#e2e8f0", boxSizing: "border-box" },
+  page: { minHeight: "100vh", overflowX: "hidden", background: "radial-gradient(1200px 600px at 50% -10%, rgba(59,130,246,0.12), transparent), #05070d", padding: "24px 16px 60px", fontFamily: "'JetBrains Mono', 'Courier New', ui-monospace, SFMono-Regular, monospace", color: "#e2e8f0", boxSizing: "border-box" },
   loadingWrap: { minHeight: "100vh", background: "#05070d", display: "flex", alignItems: "center", justifyContent: "center" },
   loadingText: { color: "#3b82f6", fontFamily: "monospace", letterSpacing: "3px", fontSize: 14, animation: "pulseGlow 1.4s ease-in-out infinite" },
   container: { maxWidth: 480, margin: "0 auto" },
@@ -697,8 +697,8 @@ const styles = {
   foodName: { flex: 1, color: "#e2e8f0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   foodMeta: { color: "#64748b", whiteSpace: "nowrap" },
   foodRemove: { color: "#475569", cursor: "pointer", padding: "0 4px" },
-  weightInput: { flex: 1, background: "rgba(0,0,0,0.3)", border: "1px solid rgba(148,163,184,0.3)", borderRadius: 4, color: "#e2e8f0", padding: "10px 12px", fontSize: 14, fontFamily: "inherit", outline: "none" },
-  weightBtn: { background: "rgba(34,211,238,0.15)", border: "1px solid rgba(34,211,238,0.5)", borderRadius: 4, color: "#22d3ee", padding: "0 18px", fontSize: 12, fontWeight: 800, letterSpacing: "1px", cursor: "pointer", fontFamily: "inherit" },
+  weightInput: { flex: 1, minWidth: 0, background: "rgba(0,0,0,0.3)", border: "1px solid rgba(148,163,184,0.3)", borderRadius: 4, color: "#e2e8f0", padding: "10px 12px", fontSize: 14, fontFamily: "inherit", outline: "none" },
+  weightBtn: { flexShrink: 0, background: "rgba(34,211,238,0.15)", border: "1px solid rgba(34,211,238,0.5)", borderRadius: 4, color: "#22d3ee", padding: "0 18px", fontSize: 12, fontWeight: 800, letterSpacing: "1px", cursor: "pointer", fontFamily: "inherit" },
   logList: { display: "flex", flexDirection: "column", gap: 4 },
   logRow: { display: "flex", justifyContent: "space-between", fontSize: 12, padding: "6px 4px", borderBottom: "1px solid rgba(148,163,184,0.08)" },
   logDate: { color: "#94a3b8" },
