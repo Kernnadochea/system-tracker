@@ -58,6 +58,27 @@
     const swBlob = new Blob([swCode], { type: "application/javascript" });
     navigator.serviceWorker.register(URL.createObjectURL(swBlob)).catch(() => {});
   }
+
+  // Animate the rank border-glow's sweep angle directly (not via transform:rotate,
+  // which would tilt the masked rectangle's corners instead of just sweeping the highlight).
+  if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    let glowAngle = 0;
+    let lastTs = null;
+    function stepGlow(ts) {
+      const el = document.querySelector(".rank-border-glow");
+      if (el) {
+        const speedSec = parseFloat(getComputedStyle(el).getPropertyValue("--glow-speed")) || 6;
+        if (lastTs !== null) {
+          const dt = (ts - lastTs) / 1000;
+          glowAngle = (glowAngle + (360 / speedSec) * dt) % 360;
+        }
+        lastTs = ts;
+        el.style.setProperty("--glow-angle", glowAngle + "deg");
+      }
+      requestAnimationFrame(stepGlow);
+    }
+    requestAnimationFrame(stepGlow);
+  }
 </script>
 
 <script type="text/babel" data-presets="react">
@@ -485,21 +506,25 @@ function SystemTracker() {
           25% { transform: translateX(-3px); }
           75% { transform: translateX(3px); }
         }
-        @keyframes spinRankGlow {
-          to { transform: rotate(360deg); }
+        .rank-border-glow::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          border: 2px solid var(--glow-c);
+          box-shadow: 0 0 10px var(--glow-c), inset 0 0 10px var(--glow-c);
+          opacity: 0.45;
         }
         .rank-border-glow::before {
           content: "";
           position: absolute;
           inset: 0;
-          padding: 3px;
+          padding: 4px;
           box-sizing: border-box;
-          background: conic-gradient(from 0deg, transparent 0%, var(--glow-c) 8%, transparent 24%, transparent 100%);
+          background: conic-gradient(from var(--glow-angle, 0deg), transparent 0%, var(--glow-c) 2%, #ffffff 4%, var(--glow-c) 6%, transparent 13%, transparent 100%);
           -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
           -webkit-mask-composite: xor;
           mask-composite: exclude;
-          filter: drop-shadow(0 0 6px var(--glow-c)) drop-shadow(0 0 16px var(--glow-c));
-          animation: spinRankGlow var(--glow-speed, 6s) linear infinite;
+          filter: drop-shadow(0 0 3px var(--glow-c));
         }
         .quest-row:hover { border-color: rgba(99,102,241,0.6) !important; }
         .quest-check:hover { filter: brightness(1.3); }
