@@ -95,6 +95,8 @@ const DAILY_QUESTS = [
 ];
 
 const SLEEP_MIN_HOURS = 8;
+const WATER_GOAL_OZ = 64;
+const WATER_INCREMENT_OZ = 8;
 const XP_PER_QUEST = 25;
 const XP_PENALTY_PER_MISSED = 15;
 const XP_TO_LEVEL = 100;
@@ -146,6 +148,7 @@ const DEFAULT_STATE = {
   weightLog: [],
   sleepLog: [],
   foodLog: [],
+  waterOz: 0,
 };
 
 // ---- Tiny sparkline (no chart library dependency) ----------------------
@@ -261,6 +264,7 @@ function SystemTracker() {
       history: newHistory,
       currentDate: today,
       quests: emptyQuestState(),
+      waterOz: 0,
     };
   }
 
@@ -357,6 +361,38 @@ function SystemTracker() {
       ...state,
       sleepLog: newLog,
       quests: { ...state.quests, sleep: shouldBeDone },
+      totalXp: newTotalXp,
+      level: newLevel,
+    };
+    setState(newState);
+    await persist(newState);
+  }
+
+  async function adjustWater(delta) {
+    if (!state) return;
+    const newWaterOz = Math.max(0, state.waterOz + delta);
+
+    const shouldBeDone = newWaterOz >= WATER_GOAL_OZ;
+    const wasDone = state.quests.water;
+    let newTotalXp = state.totalXp;
+    if (shouldBeDone !== wasDone) {
+      const xpDelta = shouldBeDone ? XP_PER_QUEST : -XP_PER_QUEST;
+      newTotalXp = Math.max(0, state.totalXp + xpDelta);
+      if (xpDelta < 0) {
+        setPenaltyFlash(true);
+        setTimeout(() => setPenaltyFlash(false), 900);
+      }
+    }
+    const newLevel = Math.floor(newTotalXp / XP_TO_LEVEL);
+    if (newLevel > state.level) {
+      setLevelUpFlash(true);
+      setTimeout(() => setLevelUpFlash(false), 1800);
+    }
+
+    const newState = {
+      ...state,
+      waterOz: newWaterOz,
+      quests: { ...state.quests, water: shouldBeDone },
       totalXp: newTotalXp,
       level: newLevel,
     };
@@ -506,6 +542,21 @@ function SystemTracker() {
 
           {DAILY_QUESTS.map((quest) => {
             const done = state.quests[quest.id];
+            if (quest.id === "water") {
+              return (
+                <div key={quest.id} style={{ ...styles.questRow, cursor: "default", borderColor: done ? "rgba(34,197,94,0.5)" : "rgba(148,163,184,0.25)", background: done ? "rgba(34,197,94,0.06)" : "transparent" }}>
+                  <div style={{ ...styles.questCheck, background: done ? "#22c55e" : "transparent", borderColor: done ? "#22c55e" : "rgba(148,163,184,0.5)" }}>{done ? "✓" : ""}</div>
+                  <div style={styles.questText}>
+                    <div style={{ ...styles.questLabel, textDecoration: done ? "line-through" : "none", opacity: done ? 0.6 : 1 }}>{quest.label}</div>
+                    <div style={styles.questDetail}>{state.waterOz > 0 ? `${state.waterOz}oz / ${WATER_GOAL_OZ}oz` : quest.detail}</div>
+                  </div>
+                  <div style={styles.waterBtnGroup} onClick={(e) => e.stopPropagation()}>
+                    <button onClick={() => adjustWater(-WATER_INCREMENT_OZ)} style={styles.waterBtnMinus} disabled={state.waterOz <= 0}>−</button>
+                    <button onClick={() => adjustWater(WATER_INCREMENT_OZ)} style={styles.waterBtnPlus}>+{WATER_INCREMENT_OZ}oz</button>
+                  </div>
+                </div>
+              );
+            }
             if (quest.id === "sleep") {
               const todaySleepHours = state.sleepLog.find((s) => s.date === todayStr())?.hours;
               return (
@@ -684,6 +735,9 @@ const styles = {
   questXp: { fontSize: 11, color: "#475569", whiteSpace: "nowrap" },
   sleepInputWrap: { display: "flex", alignItems: "center" },
   sleepInput: { width: 52, background: "rgba(0,0,0,0.3)", border: "1px solid rgba(148,163,184,0.3)", borderRadius: 4, color: "#e2e8f0", padding: "6px 8px", fontSize: 12, fontFamily: "inherit", outline: "none", textAlign: "center" },
+  waterBtnGroup: { display: "flex", alignItems: "center", gap: 6, flexShrink: 0 },
+  waterBtnMinus: { width: 26, height: 26, background: "rgba(148,163,184,0.1)", border: "1px solid rgba(148,163,184,0.35)", borderRadius: 4, color: "#94a3b8", fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 },
+  waterBtnPlus: { background: "rgba(34,211,238,0.15)", border: "1px solid rgba(34,211,238,0.5)", borderRadius: 4, color: "#22d3ee", padding: "6px 10px", fontSize: 11, fontWeight: 800, letterSpacing: "0.5px", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" },
   warnNote: { fontSize: 11.5, color: "#94a3b8", marginTop: 8, padding: "8px 10px", borderLeft: "2px solid rgba(239,68,68,0.5)", background: "rgba(239,68,68,0.05)", lineHeight: 1.5 },
   successNote: { fontSize: 11.5, color: "#86efac", marginTop: 8, padding: "8px 10px", borderLeft: "2px solid rgba(34,197,94,0.5)", background: "rgba(34,197,94,0.05)" },
   weightInputRow: { display: "flex", gap: 8 },
