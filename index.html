@@ -256,32 +256,6 @@ function WeightChart({ data }) {
   );
 }
 
-// ---- Little shadow-soldier dancers (decorative, rank-colored) -----------
-
-function ShadowDancer({ color, style, delay, flip }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width="26"
-      height="26"
-      style={{ position: "absolute", pointerEvents: "none", filter: `drop-shadow(0 0 4px ${color})`, transform: flip ? "scaleX(-1)" : "none", ...style }}
-    >
-      <g style={{ transformOrigin: "12px 20px", animation: `dancerSway 1.1s ease-in-out infinite`, animationDelay: delay }}>
-        <circle cx="12" cy="5" r="2.6" fill={color} />
-        <line x1="12" y1="7.5" x2="12" y2="16" stroke={color} strokeWidth="2" strokeLinecap="round" />
-        <g style={{ transformOrigin: "12px 10px", animation: `dancerArmLeft 1.1s ease-in-out infinite`, animationDelay: delay }}>
-          <line x1="12" y1="10" x2="6" y2="8" stroke={color} strokeWidth="2" strokeLinecap="round" />
-        </g>
-        <g style={{ transformOrigin: "12px 10px", animation: `dancerArmRight 1.1s ease-in-out infinite`, animationDelay: delay }}>
-          <line x1="12" y1="10" x2="18" y2="8" stroke={color} strokeWidth="2" strokeLinecap="round" />
-        </g>
-        <line x1="12" y1="16" x2="8" y2="22" stroke={color} strokeWidth="2" strokeLinecap="round" />
-        <line x1="12" y1="16" x2="16" y2="22" stroke={color} strokeWidth="2" strokeLinecap="round" />
-      </g>
-    </svg>
-  );
-}
-
 // ---- Component -----------------------------------------------------------
 
 function SystemTracker() {
@@ -660,18 +634,6 @@ function SystemTracker() {
         }
         .quest-row:hover { border-color: rgba(99,102,241,0.6) !important; }
         .quest-check:hover { filter: brightness(1.3); }
-        @keyframes dancerSway {
-          0%, 100% { transform: translateY(0) rotate(-8deg); }
-          50% { transform: translateY(-5px) rotate(8deg); }
-        }
-        @keyframes dancerArmLeft {
-          0%, 100% { transform: rotate(-20deg); }
-          50% { transform: rotate(50deg); }
-        }
-        @keyframes dancerArmRight {
-          0%, 100% { transform: rotate(20deg); }
-          50% { transform: rotate(-50deg); }
-        }
         @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
       `}</style>
 
@@ -695,9 +657,6 @@ function SystemTracker() {
           <div style={styles.scanlineWrap}>
             <div style={{ ...styles.scanline, background: `linear-gradient(180deg, transparent, ${rank.glow}, transparent)` }} />
           </div>
-          <ShadowDancer color={rank.color} delay="0s" style={{ top: 6, left: 6 }} />
-          <ShadowDancer color={rank.color} delay="0.35s" flip style={{ top: 6, right: 6 }} />
-          <ShadowDancer color={rank.color} delay="0.7s" style={{ bottom: 6, left: 6 }} />
           <div style={{ ...styles.statusHeader, color: rank.color, textShadow: `0 0 12px ${rank.glow}` }}>
             <span style={styles.bracket}>[</span> STATUS <span style={styles.bracket}>]</span>
           </div>
