@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>The System</title>
+<meta name="theme-color" content="#05070d" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="The System" />
+
+<!-- Inline manifest so this works as a single file -->
+<link rel="manifest" id="manifest-link" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='16' fill='%2305070d'/%3E%3Ctext x='50' y='68' font-size='58' font-family='monospace' font-weight='800' fill='%2322d3ee' text-anchor='middle'%3ES%3C/text%3E%3C/svg%3E" />
+
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin></script>
+
+<style>
+  html, body { margin: 0; padding: 0; background: #05070d; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  input[type=number]::-webkit-inner-spin-button,
+  input[type=number]::-webkit-outer-spin-button { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+  // Build a minimal installable manifest as a blob URL (keeps this a single file)
+  const manifest = {
+    name: "The System — Daily Quests",
+    short_name: "The System",
+    start_url: ".",
+    display: "standalone",
+    background_color: "#05070d",
+    theme_color: "#05070d",
+    icons: [
+      {
+        src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='16' fill='%2305070d'/%3E%3Ctext x='50' y='68' font-size='58' font-family='monospace' font-weight='800' fill='%2322d3ee' text-anchor='middle'%3ES%3C/text%3E%3C/svg%3E",
+        sizes: "192x192",
+        type: "image/svg+xml",
+      },
+    ],
+  };
+  const manifestBlob = new Blob([JSON.stringify(manifest)], { type: "application/json" });
+  document.getElementById("manifest-link").setAttribute("href", URL.createObjectURL(manifestBlob));
+
+  // Minimal offline-friendly service worker, registered from a blob (no separate file needed)
+  if ("serviceWorker" in navigator) {
+    const swCode = `
+      self.addEventListener('install', e => self.skipWaiting());
+      self.addEventListener('activate', e => self.clients.claim());
+      self.addEventListener('fetch', e => {});
+    `;
+    const swBlob = new Blob([swCode], { type: "application/javascript" });
+    navigator.serviceWorker.register(URL.createObjectURL(swBlob)).catch(() => {});
+  }
+</script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useCallback } = React;
+
+// ---- Local storage shim, same shape as the artifact's window.storage ----
+const storage = {
+  async get(key) {
+    const raw = localStorage.getItem(key);
+    if (raw === null) throw new Error("not found");
+    return { key, value: raw };
+  },
+  async set(key, value) {
+    localStorage.setItem(key, value);
+    return { key, value };
+  },
+};
+
+// ---- Constants -------------------------------------------------------
+
+const RANKS = [
+  { name: "E", title: "Awakened Rookie", min: 0, color: "#6b7280", glow: "rgba(107,114,128,0.5)" },
+  { name: "D", title: "Iron Recruit", min: 3, color: "#22c55e", glow: "rgba(34,197,94,0.5)" },
+  { name: "C", title: "Blade Adept", min: 7, color: "#22d3ee", glow: "rgba(34,211,238,0.5)" },
+  { name: "B", title: "Vanguard Hunter", min: 12, color: "#6366f1", glow: "rgba(99,102,241,0.55)" },
+  { name: "A", title: "Ascendant Warlord", min: 18, color: "#a855f7", glow: "rgba(168,85,247,0.6)" },
+  { name: "S", title: "Sovereign", min: 25, color: "#f59e0b", glow: "rgba(245,158,11,0.65)" },
+];
+
+const DAILY_QUESTS = [
+  { id: "meal", label: "Fuel Protocol", detail: "One meal, 1,400–1,600 kcal logged" },
+  { id: "training", label: "Combat Training", detail: "Lift session or Muay Thai rounds" },
+  { id: "water", label: "Hydration Check", detail: "Water + electrolytes through the fast" },
+  { id: "sleep", label: "Recovery Cycle", detail: "8+ hours logged below" },
+];
+
+const SLEEP_MIN_HOURS = 8;
+const XP_PER_QUEST = 25;
+const XP_PENALTY_PER_MISSED = 15;
+const XP_TO_LEVEL = 100;
+const KCAL_MIN = 1400;
+const KCAL_MAX = 1600;
+
+const PRESET_MEAL_ITEMS = [
+  { id: "chicken-thigh", name: "Chicken thighs, 14 oz cooked", kcal: 823, protein: 96 },
+  { id: "green-beans", name: "Green beans, 3 cups", kcal: 155, protein: 10 },
+  { id: "olive-oil", name: "Olive oil, 1.5 tbsp", kcal: 180, protein: 0 },
+  { id: "almonds", name: "Almonds, 1.5 oz (~35)", kcal: 245, protein: 9 },
+];
+
+function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function emptyQuestState() {
+  const q = {};
+  DAILY_QUESTS.forEach((quest) => (q[quest.id] = false));
+  return q;
+}
+
+function rankForLevel(level) {
+  let current = RANKS[0];
+  for (const r of RANKS) if (level >= r.min) current = r;
+  return current;
+}
+
+function nextRank(level) {
+  return RANKS.find((r) => r.min > level) || null;
+}
+
+// ---- Storage -----------------------------------------------------------
+
+const STATE_KEY = "system-tracker:state";
+
+const DEFAULT_STATE = {
+  totalXp: 0,
+  level: 0,
+  streak: 0,
+  longestStreak: 0,
+  totalDaysLogged: 0,
+  history: [],
+  currentDate: todayStr(),
+  quests: emptyQuestState(),
+  weeklyWeighIn: { lastDate: null, done: false },
+  weightLog: [],
+  sleepLog: [],
+  foodLog: [],
+};
+
+// ---- Tiny sparkline (no chart library dependency) ----------------------
+
+function WeightSparkline({ data }) {
+  if (data.length < 2) return null;
+  const w = 400, h = 100, pad = 8;
+  const weights = data.map((d) => d.weight);
+  const min = Math.min(...weights) - 1;
+  const max = Math.max(...weights) + 1;
+  const range = max - min || 1;
+  const pts = data.map((d, i) => {
+    const x = pad + (i / (data.length - 1)) * (w - pad * 2);
+    const y = h - pad - ((d.weight - min) / range) * (h - pad * 2);
+    return [x, y];
+  });
+  const path = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
+  const last = pts[pts.length - 1];
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", height: 110, display: "block" }}>
+      <path d={path} fill="none" stroke="#22d3ee" strokeWidth="2" />
+      {pts.map((p, i) => (
+        <circle key={i} cx={p[0]} cy={p[1]} r="2" fill="#22d3ee" />
+      ))}
+      <circle cx={last[0]} cy={last[1]} r="4" fill="#22d3ee" opacity="0.4" />
+      <text x={pad} y={h - 2} fontSize="9" fill="#475569" fontFamily="monospace">
+        {data[0].date.slice(5)}
+      </text>
+      <text x={w - pad} y={h - 2} fontSize="9" fill="#475569" fontFamily="monospace" textAnchor="end">
+        {data[data.length - 1].date.slice(5)}
+      </text>
+    </svg>
+  );
+}
+
+// ---- Component -----------------------------------------------------------
+
+function SystemTracker() {
+  const [state, setState] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [levelUpFlash, setLevelUpFlash] = useState(false);
+  const [penaltyFlash, setPenaltyFlash] = useState(false);
+  const [weightInput, setWeightInput] = useState("");
+  const [sleepInput, setSleepInput] = useState("");
+  const [foodName, setFoodName] = useState("");
+  const [foodKcal, setFoodKcal] = useState("");
+  const [foodProtein, setFoodProtein] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        let loaded = null;
+        try {
+          const res = await storage.get(STATE_KEY);
+          if (res && res.value) loaded = JSON.parse(res.value);
+        } catch (e) {
+          loaded = null;
+        }
+        let s = loaded ? { ...DEFAULT_STATE, ...loaded } : { ...DEFAULT_STATE };
+        s = rollDayIfNeeded(s);
+        setState(s);
+        const todayEntry = s.weightLog.find((w) => w.date === todayStr());
+        if (todayEntry) setWeightInput(String(todayEntry.weight));
+        const todaySleep = s.sleepLog.find((sl) => sl.date === todayStr());
+        if (todaySleep) setSleepInput(String(todaySleep.hours));
+        await persist(s);
+      } catch (e) {
+        setError("Could not load your progress. Starting fresh this session.");
+        setState({ ...DEFAULT_STATE });
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const persist = useCallback(async (s) => {
+    try {
+      await storage.set(STATE_KEY, JSON.stringify(s));
+    } catch (e) {
+      setError("Progress couldn't be saved on this device.");
+    }
+  }, []);
+
+  function rollDayIfNeeded(s) {
+    const today = todayStr();
+    if (s.currentDate === today) return s;
+
+    const completedIds = DAILY_QUESTS.filter((q) => s.quests[q.id]).map((q) => q.id);
+    const missedIds = DAILY_QUESTS.filter((q) => !s.quests[q.id]).map((q) => q.id);
+    const gained = completedIds.length * XP_PER_QUEST;
+    const lost = missedIds.length * XP_PENALTY_PER_MISSED;
+    const delta = gained - lost;
+
+    const allDone = missedIds.length === 0;
+    const newStreak = allDone ? s.streak + 1 : 0;
+
+    const newHistory = [
+      { date: s.currentDate, completed: completedIds, missed: missedIds, xpDelta: delta },
+      ...s.history,
+    ].slice(0, 60);
+
+    const newTotalXp = Math.max(0, s.totalXp + delta);
+    const newLevel = Math.floor(newTotalXp / XP_TO_LEVEL);
+
+    return {
+      ...s,
+      totalXp: newTotalXp,
+      level: newLevel,
+      streak: newStreak,
+      longestStreak: Math.max(s.longestStreak, newStreak),
+      totalDaysLogged: s.totalDaysLogged + 1,
+      history: newHistory,
+      currentDate: today,
+      quests: emptyQuestState(),
+    };
+  }
+
+  async function toggleQuest(id) {
+    if (!state) return;
+    const wasComplete = state.quests[id];
+    const newQuests = { ...state.quests, [id]: !wasComplete };
+    const delta = wasComplete ? -XP_PER_QUEST : XP_PER_QUEST;
+    const newTotalXp = Math.max(0, state.totalXp + delta);
+    const newLevel = Math.floor(newTotalXp / XP_TO_LEVEL);
+
+    if (newLevel > state.level) {
+      setLevelUpFlash(true);
+      setTimeout(() => setLevelUpFlash(false), 1800);
+    }
+    if (delta < 0) {
+      setPenaltyFlash(true);
+      setTimeout(() => setPenaltyFlash(false), 900);
+    }
+
+    const newState = { ...state, quests: newQuests, totalXp: newTotalXp, level: newLevel };
+    setState(newState);
+    await persist(newState);
+  }
+
+  async function logWeight() {
+    if (!state) return;
+    const val = parseFloat(weightInput);
+    if (!val || val <= 0 || val > 800) return;
+    const today = todayStr();
+    const withoutToday = state.weightLog.filter((w) => w.date !== today);
+    const newLog = [...withoutToday, { date: today, weight: val }]
+      .sort((a, b) => (a.date < b.date ? -1 : 1))
+      .slice(-90);
+    const newState = { ...state, weightLog: newLog };
+    setState(newState);
+    setWeightInput("");
+    await persist(newState);
+  }
+
+  async function togglePresetFood(preset) {
+    if (!state) return;
+    const today = todayStr();
+    const existing = state.foodLog.find((f) => f.date === today && f.presetId === preset.id);
+    let newFoodLog;
+    if (existing) {
+      newFoodLog = state.foodLog.filter((f) => f.id !== existing.id);
+    } else {
+      newFoodLog = [
+        ...state.foodLog,
+        {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          date: today,
+          presetId: preset.id,
+          name: preset.name,
+          kcal: preset.kcal,
+          protein: preset.protein,
+        },
+      ].slice(-500);
+    }
+    const newState = { ...state, foodLog: newFoodLog };
+    setState(newState);
+    await persist(newState);
+  }
+
+  async function logSleep() {
+    if (!state) return;
+    const val = parseFloat(sleepInput);
+    if (val < 0 || val > 16 || isNaN(val)) return;
+    const today = todayStr();
+    const withoutToday = state.sleepLog.filter((s) => s.date !== today);
+    const newLog = [...withoutToday, { date: today, hours: val }]
+      .sort((a, b) => (a.date < b.date ? -1 : 1))
+      .slice(-90);
+
+    const shouldBeDone = val >= SLEEP_MIN_HOURS;
+    const wasDone = state.quests.sleep;
+    let newTotalXp = state.totalXp;
+    if (shouldBeDone !== wasDone) {
+      const delta = shouldBeDone ? XP_PER_QUEST : -XP_PER_QUEST;
+      newTotalXp = Math.max(0, state.totalXp + delta);
+      if (delta < 0) {
+        setPenaltyFlash(true);
+        setTimeout(() => setPenaltyFlash(false), 900);
+      }
+    }
+    const newLevel = Math.floor(newTotalXp / XP_TO_LEVEL);
+    if (newLevel > state.level) {
+      setLevelUpFlash(true);
+      setTimeout(() => setLevelUpFlash(false), 1800);
+    }
+
+    const newState = {
+      ...state,
+      sleepLog: newLog,
+      quests: { ...state.quests, sleep: shouldBeDone },
+      totalXp: newTotalXp,
+      level: newLevel,
+    };
+    setState(newState);
+    await persist(newState);
+  }
+
+  async function addFoodEntry() {
+    if (!state) return;
+    const kcal = parseFloat(foodKcal);
+    if (!kcal || kcal <= 0 || kcal > 5000) return;
+    const protein = parseFloat(foodProtein) || 0;
+    const entry = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      date: todayStr(),
+      name: foodName.trim() || "Untitled item",
+      kcal,
+      protein,
+    };
+    const newState = { ...state, foodLog: [...state.foodLog, entry].slice(-500) };
+    setState(newState);
+    setFoodName("");
+    setFoodKcal("");
+    setFoodProtein("");
+    await persist(newState);
+  }
+
+  async function removeFoodEntry(id) {
+    if (!state) return;
+    const newState = { ...state, foodLog: state.foodLog.filter((f) => f.id !== id) };
+    setState(newState);
+    await persist(newState);
+  }
+
+  async function toggleWeighIn() {
+    if (!state) return;
+    const done = !state.weeklyWeighIn.done;
+    const delta = done ? XP_PER_QUEST : -XP_PER_QUEST;
+    const newTotalXp = Math.max(0, state.totalXp + delta);
+    const newLevel = Math.floor(newTotalXp / XP_TO_LEVEL);
+    const newState = {
+      ...state,
+      totalXp: newTotalXp,
+      level: newLevel,
+      weeklyWeighIn: { lastDate: done ? todayStr() : null, done },
+    };
+    setState(newState);
+    await persist(newState);
+  }
+
+  if (loading) {
+    return <div style={styles.loadingWrap}><div style={styles.loadingText}>SYSTEM INITIALIZING…</div></div>;
+  }
+  if (!state) return null;
+
+  const rank = rankForLevel(state.level);
+  const rankIndex = RANKS.findIndex((r) => r.name === rank.name);
+  const upNext = nextRank(state.level);
+  const xpIntoLevel = state.totalXp % XP_TO_LEVEL;
+  const xpPct = Math.min(100, (xpIntoLevel / XP_TO_LEVEL) * 100);
+  const completedToday = DAILY_QUESTS.filter((q) => state.quests[q.id]).length;
+  const allDoneToday = completedToday === DAILY_QUESTS.length;
+  const todaysFood = state.foodLog.filter((f) => f.date === todayStr());
+  const checkedPresetIds = new Set(todaysFood.filter((f) => f.presetId).map((f) => f.presetId));
+  const extraFood = todaysFood.filter((f) => !f.presetId);
+  const kcalToday = todaysFood.reduce((sum, f) => sum + f.kcal, 0);
+  const proteinToday = todaysFood.reduce((sum, f) => sum + f.protein, 0);
+  const kcalStatus = kcalToday === 0 ? "none" : kcalToday < KCAL_MIN ? "under" : kcalToday > KCAL_MAX ? "over" : "inRange";
+  const kcalColor = { none: "#475569", under: "#f59e0b", inRange: "#22c55e", over: "#ef4444" }[kcalStatus];
+
+  return (
+    <div style={styles.page}>
+      <style>{`
+        @keyframes pulseGlow {
+          0%, 100% { box-shadow: 0 0 12px var(--glow-color, rgba(99,102,241,0.4)); }
+          50% { box-shadow: 0 0 28px var(--glow-color, rgba(99,102,241,0.7)); }
+        }
+        @keyframes scanline {
+          0% { transform: translateY(-100%); }
+          100% { transform: translateY(100%); }
+        }
+        @keyframes levelFlash {
+          0% { opacity: 0; transform: scale(0.9); }
+          15% { opacity: 1; transform: scale(1.02); }
+          85% { opacity: 1; transform: scale(1); }
+          100% { opacity: 0; transform: scale(1); }
+        }
+        @keyframes shake {
+          0%, 100% { transform: translateX(0); }
+          25% { transform: translateX(-3px); }
+          75% { transform: translateX(3px); }
+        }
+        .quest-row:hover { border-color: rgba(99,102,241,0.6) !important; }
+        .quest-check:hover { filter: brightness(1.3); }
+        @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+      `}</style>
+
+      {levelUpFlash && (
+        <div style={styles.levelUpOverlay}>
+          <div style={{ ...styles.levelUpText, animation: "levelFlash 1.8s ease" }}>
+            LEVEL UP
+            <div style={styles.levelUpSub}>Lv. {state.level} — {rank.title}</div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ ...styles.container, animation: penaltyFlash ? "shake 0.4s ease" : "none" }}>
+        <div style={styles.statusWindow}>
+          <div style={{ ...styles.statusWindowGlow, boxShadow: `0 0 ${28 + rankIndex * 14}px ${rank.glow}, inset 0 0 ${40 + rankIndex * 10}px rgba(0,0,0,0.35)`, borderColor: `${rank.color}66` }} />
+          <div style={styles.scanlineWrap}>
+            <div style={{ ...styles.scanline, background: `linear-gradient(180deg, transparent, ${rank.glow}, transparent)` }} />
+          </div>
+          <div style={{ ...styles.statusHeader, color: rank.color, textShadow: `0 0 12px ${rank.glow}` }}>
+            <span style={styles.bracket}>[</span> STATUS <span style={styles.bracket}>]</span>
+          </div>
+
+          <div style={styles.statusGrid}>
+            <div style={styles.rankBadge}>
+              <div style={{ ...styles.rankCircle, borderColor: rank.color, color: rank.color, "--glow-color": rank.glow, animation: "pulseGlow 2.4s ease-in-out infinite" }}>
+                {rank.name}
+              </div>
+              <div style={styles.rankLabel}>RANK</div>
+              <div style={{ ...styles.rankTitle, color: rank.color }}>{rank.title}</div>
+            </div>
+
+            <div style={styles.statLines}>
+              <div style={styles.statLine}><span style={styles.statKey}>LEVEL</span><span style={{ ...styles.statVal, color: rank.color }}>{state.level}</span></div>
+              <div style={styles.statLine}><span style={styles.statKey}>STREAK</span><span style={styles.statVal}>{state.streak}d <span style={styles.statSubtle}>(best {state.longestStreak}d)</span></span></div>
+              <div style={styles.statLine}><span style={styles.statKey}>DAYS LOGGED</span><span style={styles.statVal}>{state.totalDaysLogged}</span></div>
+            </div>
+          </div>
+
+          <div style={styles.xpBarLabel}>
+            <span>EXP</span>
+            <span>{xpIntoLevel} / {XP_TO_LEVEL}{upNext && <span style={styles.statSubtle}> — next rank at Lv.{upNext.min}</span>}</span>
+          </div>
+          <div style={styles.xpBarTrack}>
+            <div style={{ ...styles.xpBarFill, width: `${xpPct}%`, background: `linear-gradient(90deg, ${rank.color}, #ffffff)` }} />
+          </div>
+        </div>
+
+        <div style={styles.panel}>
+          <div style={styles.panelHeader}>
+            <span style={styles.bracket}>[</span> DAILY QUEST <span style={styles.bracket}>]</span>
+            <span style={styles.panelHeaderSub}>{completedToday}/{DAILY_QUESTS.length} complete</span>
+          </div>
+
+          {DAILY_QUESTS.map((quest) => {
+            const done = state.quests[quest.id];
+            if (quest.id === "sleep") {
+              const todaySleepHours = state.sleepLog.find((s) => s.date === todayStr())?.hours;
+              return (
+                <div key={quest.id} style={{ ...styles.questRow, cursor: "default", borderColor: done ? "rgba(34,197,94,0.5)" : "rgba(148,163,184,0.25)", background: done ? "rgba(34,197,94,0.06)" : "transparent" }}>
+                  <div style={{ ...styles.questCheck, background: done ? "#22c55e" : "transparent", borderColor: done ? "#22c55e" : "rgba(148,163,184,0.5)" }}>{done ? "✓" : ""}</div>
+                  <div style={styles.questText}>
+                    <div style={{ ...styles.questLabel, textDecoration: done ? "line-through" : "none", opacity: done ? 0.6 : 1 }}>{quest.label}</div>
+                    <div style={styles.questDetail}>{typeof todaySleepHours === "number" ? `${todaySleepHours}h logged` : quest.detail}</div>
+                  </div>
+                  <div style={styles.sleepInputWrap} onClick={(e) => e.stopPropagation()}>
+                    <input type="number" inputMode="decimal" step="0.5" placeholder="hrs" value={sleepInput} onChange={(e) => setSleepInput(e.target.value)} onBlur={logSleep} onKeyDown={(e) => e.key === "Enter" && logSleep()} style={styles.sleepInput} />
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <div key={quest.id} className="quest-row" style={{ ...styles.questRow, borderColor: done ? "rgba(34,197,94,0.5)" : "rgba(148,163,184,0.25)", background: done ? "rgba(34,197,94,0.06)" : "transparent" }} onClick={() => toggleQuest(quest.id)}>
+                <div className="quest-check" style={{ ...styles.questCheck, background: done ? "#22c55e" : "transparent", borderColor: done ? "#22c55e" : "rgba(148,163,184,0.5)" }}>{done ? "✓" : ""}</div>
+                <div style={styles.questText}>
+                  <div style={{ ...styles.questLabel, textDecoration: done ? "line-through" : "none", opacity: done ? 0.6 : 1 }}>{quest.label}</div>
+                  <div style={styles.questDetail}>{quest.detail}</div>
+                </div>
+                <div style={styles.questXp}>{done ? `+${XP_PER_QUEST}` : `${XP_PER_QUEST}xp`}</div>
+              </div>
+            );
+          })}
+
+          {!allDoneToday && <div style={styles.warnNote}>Unfinished quests at day's end cost {XP_PENALTY_PER_MISSED} EXP each — no makeup reps, no extra rounds. The System deducts, it doesn't pile on.</div>}
+          {allDoneToday && <div style={styles.successNote}>All quests cleared. Streak protected.</div>}
+        </div>
+
+        <div style={styles.panel}>
+          <div style={styles.panelHeader}><span style={styles.bracket}>[</span> WEEKLY QUEST <span style={styles.bracket}>]</span></div>
+          <div className="quest-row" style={{ ...styles.questRow, borderColor: state.weeklyWeighIn.done ? "rgba(34,211,238,0.5)" : "rgba(148,163,184,0.25)", background: state.weeklyWeighIn.done ? "rgba(34,211,238,0.06)" : "transparent" }} onClick={toggleWeighIn}>
+            <div className="quest-check" style={{ ...styles.questCheck, background: state.weeklyWeighIn.done ? "#22d3ee" : "transparent", borderColor: state.weeklyWeighIn.done ? "#22d3ee" : "rgba(148,163,184,0.5)" }}>{state.weeklyWeighIn.done ? "✓" : ""}</div>
+            <div style={styles.questText}>
+              <div style={{ ...styles.questLabel, textDecoration: state.weeklyWeighIn.done ? "line-through" : "none", opacity: state.weeklyWeighIn.done ? 0.6 : 1 }}>Vitals Check</div>
+              <div style={styles.questDetail}>Weekly weigh-in, same day &amp; conditions</div>
+            </div>
+            <div style={styles.questXp}>{state.weeklyWeighIn.done ? `+${XP_PER_QUEST}` : `${XP_PER_QUEST}xp`}</div>
+          </div>
+        </div>
+
+        <div style={styles.panel}>
+          <div style={styles.panelHeader}>
+            <span style={styles.bracket}>[</span> FUEL LOG <span style={styles.bracket}>]</span>
+            <span style={{ ...styles.panelHeaderSub, color: kcalColor, fontWeight: 700 }}>{kcalToday} kcal</span>
+          </div>
+
+          <div style={styles.kcalBarTrack}>
+            <div style={{ ...styles.kcalBarFill, width: `${Math.min(100, (kcalToday / KCAL_MAX) * 100)}%`, background: kcalColor }} />
+            <div style={{ ...styles.kcalTargetMarker, left: `${(KCAL_MIN / KCAL_MAX) * 100}%` }} />
+          </div>
+          <div style={styles.kcalRangeLabel}>Target {KCAL_MIN}–{KCAL_MAX} kcal · {proteinToday}g protein logged</div>
+
+          <div style={styles.presetList}>
+            {PRESET_MEAL_ITEMS.map((item) => {
+              const done = checkedPresetIds.has(item.id);
+              return (
+                <div key={item.id} className="quest-row" style={{ ...styles.questRow, borderColor: done ? "rgba(34,197,94,0.5)" : "rgba(148,163,184,0.25)", background: done ? "rgba(34,197,94,0.06)" : "transparent" }} onClick={() => togglePresetFood(item)}>
+                  <div className="quest-check" style={{ ...styles.questCheck, background: done ? "#22c55e" : "transparent", borderColor: done ? "#22c55e" : "rgba(148,163,184,0.5)" }}>{done ? "✓" : ""}</div>
+                  <div style={styles.questText}>
+                    <div style={{ ...styles.questLabel, fontSize: 13, textDecoration: done ? "line-through" : "none", opacity: done ? 0.6 : 1 }}>{item.name}</div>
+                  </div>
+                  <div style={styles.questXp}>{item.kcal} kcal{item.protein ? ` · ${item.protein}g` : ""}</div>
+                </div>
+              );
+            })}
+          </div>
+
+          {extraFood.length > 0 && (
+            <div style={{ ...styles.logList, marginTop: 4, marginBottom: 8 }}>
+              {extraFood.map((f) => (
+                <div key={f.id} style={styles.foodRow}>
+                  <span style={styles.foodName}>{f.name}</span>
+                  <span style={styles.foodMeta}>{f.kcal} kcal{f.protein ? ` · ${f.protein}g` : ""}</span>
+                  <span style={styles.foodRemove} onClick={() => removeFoodEntry(f.id)}>✕</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div style={styles.foodInputRow}>
+            <input type="text" placeholder="extra item" value={foodName} onChange={(e) => setFoodName(e.target.value)} style={{ ...styles.weightInput, flex: 2 }} />
+            <input type="number" inputMode="numeric" placeholder="kcal" value={foodKcal} onChange={(e) => setFoodKcal(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addFoodEntry()} style={{ ...styles.weightInput, flex: 1 }} />
+            <input type="number" inputMode="numeric" placeholder="protein g" value={foodProtein} onChange={(e) => setFoodProtein(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addFoodEntry()} style={{ ...styles.weightInput, flex: 1 }} />
+            <button onClick={addFoodEntry} style={styles.weightBtn}>ADD</button>
+          </div>
+        </div>
+
+        <div style={styles.panel}>
+          <div style={styles.panelHeader}>
+            <span style={styles.bracket}>[</span> VITALS LOG <span style={styles.bracket}>]</span>
+            {state.weightLog.length > 1 && (
+              <span style={styles.panelHeaderSub}>
+                {(() => {
+                  const first = state.weightLog[0].weight;
+                  const last = state.weightLog[state.weightLog.length - 1].weight;
+                  const diff = (last - first).toFixed(1);
+                  return `${diff <= 0 ? "" : "+"}${diff} lb since start`;
+                })()}
+              </span>
+            )}
+          </div>
+
+          <div style={styles.weightInputRow}>
+            <input type="number" inputMode="decimal" placeholder="lb today" value={weightInput} onChange={(e) => setWeightInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && logWeight()} style={styles.weightInput} />
+            <button onClick={logWeight} style={styles.weightBtn}>LOG</button>
+          </div>
+
+          {state.weightLog.length >= 2 ? (
+            <div style={{ marginTop: 12 }}><WeightSparkline data={state.weightLog} /></div>
+          ) : (
+            <div style={styles.questDetail}>Log a couple more days to see your trend line.</div>
+          )}
+          <div style={styles.footer}>Day-to-day swings are mostly water — read the trend across a week, not any single entry.</div>
+        </div>
+
+        {state.history.length > 0 && (
+          <div style={styles.panel}>
+            <div style={styles.panelHeader}><span style={styles.bracket}>[</span> HUNTER LOG <span style={styles.bracket}>]</span></div>
+            <div style={styles.logList}>
+              {state.history.slice(0, 10).map((entry) => (
+                <div key={entry.date} style={styles.logRow}>
+                  <span style={styles.logDate}>{entry.date}</span>
+                  <span style={styles.logCount}>{entry.completed.length}/{DAILY_QUESTS.length}</span>
+                  <span style={{ ...styles.logXp, color: entry.xpDelta >= 0 ? "#22c55e" : "#ef4444" }}>{entry.xpDelta >= 0 ? "+" : ""}{entry.xpDelta} XP</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {error && <div style={styles.errorNote}>{error}</div>}
+        <div style={styles.footer}>Quests reset at midnight, your device time. Tap a quest any time today to check it off.</div>
+      </div>
+    </div>
+  );
+}
+
+const styles = {
+  page: { minHeight: "100vh", background: "radial-gradient(1200px 600px at 50% -10%, rgba(59,130,246,0.12), transparent), #05070d", padding: "24px 16px 60px", fontFamily: "'JetBrains Mono', 'Courier New', ui-monospace, SFMono-Regular, monospace", color: "#e2e8f0", boxSizing: "border-box" },
+  loadingWrap: { minHeight: "100vh", background: "#05070d", display: "flex", alignItems: "center", justifyContent: "center" },
+  loadingText: { color: "#3b82f6", fontFamily: "monospace", letterSpacing: "3px", fontSize: 14, animation: "pulseGlow 1.4s ease-in-out infinite" },
+  container: { maxWidth: 480, margin: "0 auto" },
+  levelUpOverlay: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none", zIndex: 50 },
+  levelUpText: { fontSize: 42, fontWeight: 800, letterSpacing: "6px", color: "#fff", textShadow: "0 0 30px rgba(99,102,241,0.9), 0 0 60px rgba(99,102,241,0.6)", textAlign: "center" },
+  levelUpSub: { fontSize: 16, letterSpacing: "3px", marginTop: 8, color: "#a5b4fc" },
+  statusWindow: { position: "relative", overflow: "hidden", border: "1px solid rgba(99,102,241,0.4)", borderRadius: 4, background: "linear-gradient(160deg, rgba(15,23,42,0.9), rgba(10,14,26,0.95))", padding: "20px 18px", marginBottom: 16, boxShadow: "0 0 40px rgba(59,130,246,0.08), inset 0 0 60px rgba(59,130,246,0.03)" },
+  statusWindowGlow: { position: "absolute", inset: 0, borderRadius: 4, border: "1px solid transparent", pointerEvents: "none", transition: "box-shadow 0.8s ease, border-color 0.8s ease" },
+  scanlineWrap: { position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", opacity: 0.15 },
+  scanline: { position: "absolute", left: 0, right: 0, height: "40%", animation: "scanline 5s linear infinite" },
+  statusHeader: { fontSize: 13, letterSpacing: "4px", marginBottom: 18, fontWeight: 700 },
+  bracket: { color: "#3b82f6" },
+  statusGrid: { display: "flex", alignItems: "center", gap: 20, marginBottom: 18 },
+  rankBadge: { display: "flex", flexDirection: "column", alignItems: "center", gap: 6 },
+  rankCircle: { width: 64, height: 64, borderRadius: "50%", border: "2px solid", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, fontWeight: 800, background: "rgba(0,0,0,0.3)" },
+  rankLabel: { fontSize: 10, letterSpacing: "2px", color: "#64748b" },
+  rankTitle: { fontSize: 10.5, fontWeight: 700, letterSpacing: "0.5px", textAlign: "center", maxWidth: 80, lineHeight: 1.2 },
+  statLines: { flex: 1, display: "flex", flexDirection: "column", gap: 8 },
+  statLine: { display: "flex", justifyContent: "space-between", fontSize: 13 },
+  statKey: { color: "#64748b", letterSpacing: "1px" },
+  statVal: { color: "#e2e8f0", fontWeight: 700 },
+  statSubtle: { color: "#475569", fontWeight: 400, fontSize: 11 },
+  xpBarLabel: { display: "flex", justifyContent: "space-between", fontSize: 11, color: "#64748b", marginBottom: 6, letterSpacing: "1px" },
+  xpBarTrack: { height: 8, borderRadius: 4, background: "rgba(148,163,184,0.15)", overflow: "hidden" },
+  xpBarFill: { height: "100%", borderRadius: 4, transition: "width 0.5s ease" },
+  panel: { border: "1px solid rgba(148,163,184,0.2)", borderRadius: 4, background: "rgba(15,23,42,0.5)", padding: "16px 16px 14px", marginBottom: 14 },
+  panelHeader: { fontSize: 12, letterSpacing: "3px", color: "#93c5fd", marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center", fontWeight: 700 },
+  panelHeaderSub: { color: "#64748b", fontSize: 11, letterSpacing: "0px", fontWeight: 400 },
+  questRow: { display: "flex", alignItems: "center", gap: 12, padding: "10px 10px", border: "1px solid", borderRadius: 4, marginBottom: 8, cursor: "pointer", transition: "border-color 0.2s ease, background 0.2s ease" },
+  questCheck: { width: 22, height: 22, minWidth: 22, borderRadius: 4, border: "2px solid", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, color: "#05070d", fontWeight: 800, transition: "background 0.15s ease, border-color 0.15s ease" },
+  questText: { flex: 1, minWidth: 0 },
+  questLabel: { fontSize: 14, fontWeight: 700, color: "#e2e8f0" },
+  questDetail: { fontSize: 11.5, color: "#64748b", marginTop: 2 },
+  questXp: { fontSize: 11, color: "#475569", whiteSpace: "nowrap" },
+  sleepInputWrap: { display: "flex", alignItems: "center" },
+  sleepInput: { width: 52, background: "rgba(0,0,0,0.3)", border: "1px solid rgba(148,163,184,0.3)", borderRadius: 4, color: "#e2e8f0", padding: "6px 8px", fontSize: 12, fontFamily: "inherit", outline: "none", textAlign: "center" },
+  warnNote: { fontSize: 11.5, color: "#94a3b8", marginTop: 8, padding: "8px 10px", borderLeft: "2px solid rgba(239,68,68,0.5)", background: "rgba(239,68,68,0.05)", lineHeight: 1.5 },
+  successNote: { fontSize: 11.5, color: "#86efac", marginTop: 8, padding: "8px 10px", borderLeft: "2px solid rgba(34,197,94,0.5)", background: "rgba(34,197,94,0.05)" },
+  weightInputRow: { display: "flex", gap: 8 },
+  presetList: { marginTop: 10, marginBottom: 4 },
+  foodInputRow: { display: "flex", gap: 6, marginTop: 10 },
+  kcalBarTrack: { position: "relative", height: 10, borderRadius: 5, background: "rgba(148,163,184,0.15)", overflow: "visible", marginBottom: 6 },
+  kcalBarFill: { height: "100%", borderRadius: 5, transition: "width 0.4s ease, background 0.4s ease" },
+  kcalTargetMarker: { position: "absolute", top: -3, width: 2, height: 16, background: "rgba(255,255,255,0.5)" },
+  kcalRangeLabel: { fontSize: 10.5, color: "#475569", marginBottom: 4 },
+  foodRow: { display: "flex", alignItems: "center", gap: 8, fontSize: 12, padding: "6px 4px", borderBottom: "1px solid rgba(148,163,184,0.08)" },
+  foodName: { flex: 1, color: "#e2e8f0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  foodMeta: { color: "#64748b", whiteSpace: "nowrap" },
+  foodRemove: { color: "#475569", cursor: "pointer", padding: "0 4px" },
+  weightInput: { flex: 1, background: "rgba(0,0,0,0.3)", border: "1px solid rgba(148,163,184,0.3)", borderRadius: 4, color: "#e2e8f0", padding: "10px 12px", fontSize: 14, fontFamily: "inherit", outline: "none" },
+  weightBtn: { background: "rgba(34,211,238,0.15)", border: "1px solid rgba(34,211,238,0.5)", borderRadius: 4, color: "#22d3ee", padding: "0 18px", fontSize: 12, fontWeight: 800, letterSpacing: "1px", cursor: "pointer", fontFamily: "inherit" },
+  logList: { display: "flex", flexDirection: "column", gap: 4 },
+  logRow: { display: "flex", justifyContent: "space-between", fontSize: 12, padding: "6px 4px", borderBottom: "1px solid rgba(148,163,184,0.08)" },
+  logDate: { color: "#94a3b8" },
+  logCount: { color: "#64748b" },
+  logXp: { fontWeight: 700, minWidth: 56, textAlign: "right" },
+  errorNote: { fontSize: 12, color: "#fca5a5", textAlign: "center", marginBottom: 12 },
+  footer: { fontSize: 11, color: "#475569", textAlign: "center", marginTop: 8, lineHeight: 1.6 },
+};
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<SystemTracker />);
+</script>
+</body>
+</html>
